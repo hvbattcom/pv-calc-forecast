@@ -1,0 +1,8 @@
+[system]
+latitude = 41.000
+longitude = 22.000
+system_capacity = 10.0
+panel_tilt = 30.0
+panel_azimuth = 180.0
+timezone = Europe/Athens
+shortname = mysystem
