@@ -1,16 +1,17 @@
 # pv-calc-forecast
 
-A single CLI tool for solar PV **clear-sky calculation** and **weather-based forecasting**, powered by [pvlib](https://pvlib-python.readthedocs.io) and the [forecast.solar](https://forecast.solar) API.
+A single CLI tool for solar PV **clear-sky calculation** and **weather-based forecasting**, powered by [pvlib](https://pvlib-python.readthedocs.io) and multiple forecast sources.
 
-Both modes share the same system parameters (location, capacity, tilt, azimuth). Timezone is **auto-detected from coordinates** — no need to specify it manually.
+Supports **multiple PV strings** (panel arrays with different orientations) in a single run — designed to be used as a long-running Prometheus exporter service. Timezone is **auto-detected from coordinates** — no need to specify it manually.
 
 ## Features
 
 - **Calculate mode** — theoretical DC output under clear-sky conditions via pvlib
-- **Forecast mode** — real weather forecast from forecast.solar API, with local pvlib transposition to your actual tilt/azimuth
-- Forecast caching (1 hour TTL) — one cache entry per location regardless of tilt/azimuth
+- **Forecast mode** — real weather forecast from three sources, with local pvlib transposition to your actual tilt/azimuth
+- **Multi-string support** — define multiple panel arrays (PV1, PV2, PV3…) via config or CLI; per-string and total metrics emitted
+- Forecast caching (1 hour TTL) — weather data fetched once per location, transposed per string
 - Output formats: human-readable table, JSON, Prometheus metrics
-- `config.cfg` for storing default system parameters
+- `config.cfg` for storing system parameters
 
 ## Requirements
 
@@ -20,7 +21,33 @@ pip install -r requirements.txt
 
 ## Configuration
 
-Store your system parameters in `config.cfg` (see `config.cfg.example`) so you don't need to pass them on every invocation. CLI arguments always take precedence over config values.
+### Multi-string (recommended)
+
+Define each panel array as a named section in `config.cfg`. Section names become the `string=` label in Prometheus output.
+
+```ini
+[system]
+latitude  = 41.000
+longitude = 22.000
+timezone  = Europe/Athens
+
+[PV1]
+capacity = 15     # kWp
+tilt     = 30     # degrees from horizontal
+azimuth  = 205    # degrees clockwise from North (180=South, 90=East, 270=West)
+
+[PV2]
+capacity = 10
+tilt     = 25
+azimuth  = 90
+
+[PV3]
+capacity = 5
+tilt     = 25
+azimuth  = 270
+```
+
+### Single-string (legacy / one-off runs)
 
 ```ini
 [system]
@@ -39,6 +66,20 @@ A custom config path can be specified with `--config /path/to/config.cfg`.
 ```
 pv-calc-forecast.py (--calculate | --forecast) [options]
 ```
+
+### Multi-string via CLI
+
+Strings can be defined directly on the command line with repeatable `--string` flags (overrides config sections):
+
+```bash
+./pv-calc-forecast.py --forecast=open-meteo --format=prometheus \
+  --latitude=41.000 --longitude=22.000 --timezone=Europe/Athens \
+  --string PV1:15:30:205 \
+  --string PV2:10:25:90 \
+  --string PV3:5:25:270
+```
+
+Format: `NAME:CAPACITY_kWp:TILT_deg:AZIMUTH_deg`
 
 ### Calculate mode
 
@@ -111,11 +152,12 @@ All sources cache results locally. Cache TTL: 1 hour for forecast.solar and Open
 |--------|-------------|
 | `--latitude` | Location latitude |
 | `--longitude` | Location longitude |
-| `--system-capacity` | System capacity in kWp |
-| `--panel-tilt` | Panel tilt in degrees |
-| `--panel-azimuth` | Panel azimuth in degrees (180 = South, 90 = East, 270 = West) |
-| `--shortname` | Short label for the system |
 | `--timezone` | Override timezone (auto-detected from coordinates if omitted) |
+| `--string NAME:CAPACITY:TILT:AZIMUTH` | Define a PV string (repeatable; overrides config sections) |
+| `--system-capacity` | System capacity in kWp (single-string mode only) |
+| `--panel-tilt` | Panel tilt in degrees (single-string mode only) |
+| `--panel-azimuth` | Panel azimuth in degrees (single-string mode only) |
+| `--shortname` | String name to use in single-string mode |
 | `--format` | `human` (default), `json`, `prometheus` |
 | `--config` | Path to config file |
 
@@ -133,89 +175,79 @@ GHI             849.22 W/m²
 --------------  ---------------------
 ```
 
-Calculate mode — timeframe:
+Forecast mode — multi-string:
 ```
-Time                   DC Power (kW)    POA Irr (W/m²)    GHI (W/m²)
----------------------  ---------------  ----------------  ------------
-2024-06-15 08:00 EEST             1.64            163.74        235.82
-2024-06-15 09:00 EEST             3.60            359.59        423.89
-...
-```
-
-Forecast mode:
-```
+=== PV1 ===
 Date          Energy (Wh)
 ----------  -------------
-2024-06-15        56,848
-2024-06-16        54,711
+2024-06-15        110,618
 
-Hour              Power (W)
-----------------  -----------
-2024-06-15 08:00       1,462
-2024-06-15 09:00       3,175
-...
+=== PV2 ===
+Date          Energy (Wh)
+----------  -------------
+2024-06-15         67,693
 ```
 
 ### JSON
 
-Calculate mode:
+Multi-string forecast:
 ```json
 {
-  "timestamp": "2024-06-15 12:00 EEST",
-  "dc_power_watts": 8588.15,
-  "poa_irradiance": 858.82,
-  "ghi": 849.22
-}
-```
-
-Forecast mode:
-```json
-{
-  "watt_hours_day": {
-    "2024-06-15": 56848,
-    "2024-06-16": 54711
+  "PV1": {
+    "watt_hours_day": { "2024-06-15": 110618 },
+    "watts_tilted":   { "2024-06-15 08:00:00": 1462 }
   },
-  "watts_tilted": {
-    "2024-06-15 08:00:00": 1462,
-    "2024-06-15 09:00:00": 3175
+  "PV2": {
+    "watt_hours_day": { "2024-06-15": 67693 },
+    "watts_tilted":   { "2024-06-15 08:00:00": 890 }
   }
 }
 ```
 
 ### Prometheus
 
+All metrics use a `string=` label. When multiple strings are configured, a `string="total"` row is also emitted.
+
 Calculate mode:
 ```
-theoretical_pv_watts{shortname="mysystem",plant="theoretical",capacity="10.0"} 8588.15
+theoretical_pv_watts{string="PV1",plant="theoretical",capacity="15.0"} 8250.00
+theoretical_pv_watts{string="PV2",plant="theoretical",capacity="10.0"} 4100.00
+theoretical_pv_watts{string="total",plant="theoretical",capacity="25.0"} 12350.00
 ```
 
 Forecast mode:
 ```
 # HELP solar_forecast_watt_hours_day Forecasted solar energy production in watt-hours per day
 # TYPE solar_forecast_watt_hours_day gauge
-solar_forecast_watt_hours_day{forecast="solar",shortname="mysystem",date="2024-06-15"} 56848
+solar_forecast_watt_hours_day{string="PV1",forecast="solar",date="2024-06-15"} 110618
+solar_forecast_watt_hours_day{string="PV2",forecast="solar",date="2024-06-15"} 67693
+solar_forecast_watt_hours_day{string="total",forecast="solar",date="2024-06-15"} 178311
 
 # HELP solar_forecast_hour_watts Forecasted solar power output per hour in watts, labelled by date and hour
 # TYPE solar_forecast_hour_watts gauge
-solar_forecast_hour_watts{shortname="mysystem",date="2024-06-15",hour="08:00"} 1462
-solar_forecast_hour_watts{shortname="mysystem",date="2024-06-15",hour="09:00"} 3175
+solar_forecast_hour_watts{string="PV1",date="2024-06-15",hour="14:00"} 18500
+solar_forecast_hour_watts{string="PV2",date="2024-06-15",hour="14:00"} 9200
+solar_forecast_hour_watts{string="total",date="2024-06-15",hour="14:00"} 27700
 
 # HELP solar_forecast_current_hour_watts Forecasted solar power output for the current hour in watts
 # TYPE solar_forecast_current_hour_watts gauge
-solar_forecast_current_hour_watts{forecast="hourly",shortname="mysystem"} 3175
+solar_forecast_current_hour_watts{string="PV1",forecast="hourly"} 18500
+solar_forecast_current_hour_watts{string="PV2",forecast="hourly"} 9200
+solar_forecast_current_hour_watts{string="total",forecast="hourly"} 27700
 ```
 
 ## Notes
 
-- Timezone is auto-detected from latitude/longitude using `timezonefinder`; use `--timezone` only to override, or set `timezone` in config.cfg to avoid the 4-second startup cost on ARM boards
+- Timezone is auto-detected from latitude/longitude using `timezonefinder`; set `timezone` in `[system]` to avoid the ~4s startup cost on ARM boards
 - Panel azimuth: 180° = South, 90° = East, 270° = West
-- Calculate mode filters out negligible production values (< 0.001 kW)
-- Calculate mode assumes clear-sky conditions
+- `--string` flags take priority over `[PV*]` config sections, which take priority over single-string CLI params
+- Weather data is fetched once per location and transposed independently per string — no extra API calls for additional strings
+- Calculate mode filters out negligible production values (< 0.001 kW) and assumes clear-sky conditions
 - Forecast mode daily totals are summed from the transposed hourly values, not taken from the raw API response
 - Open-Meteo uses actual DNI/DHI from its NWP model for an exact pvlib transposition; forecast.solar uses a clear-sky ratio approximation (the API only exposes total watts, not irradiance components)
-- Solcast rooftop forecasts use the tilt, azimuth and capacity configured in your Solcast account dashboard — `--panel-tilt`, `--panel-azimuth`, and `--system-capacity` are not applied to Solcast output
+- Solcast rooftop forecasts use the tilt, azimuth and capacity configured in your Solcast account dashboard; for multi-string Solcast use, add `solcast_resource_id` to each `[PV*]` section
 - Solcast free tier: 10 API calls/day — results are cached for 4 hours; expired cache is used on rate-limit errors
-- `--hourly-window` only gates the hourly block in Prometheus format (useful for Prometheus scrapers); human and JSON output always include the full hourly table
+- `--hourly-window` only gates the hourly block in Prometheus format; human and JSON output always include the full hourly table
 
 ## Solcast setup
 
@@ -224,8 +256,10 @@ solar_forecast_current_hour_watts{forecast="hourly",shortname="mysystem"} 3175
 3. Copy your API key from the account dashboard
 4. Add to `config.cfg`:
    ```ini
-   solcast_api_key   = your-key-here
-   # solcast_resource_id = b1e1-c590-b64e-dc50  # optional: auto-detected if only one site
+   solcast_api_key = your-key-here
+   # Per-string resource IDs in each [PV*] section:
+   # [PV1]
+   # solcast_resource_id = b1e1-c590-b64e-dc50
    ```
 
 ## License

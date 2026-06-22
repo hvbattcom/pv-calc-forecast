@@ -88,6 +88,9 @@ def parse_args_and_config():
                         help='Panel azimuth in degrees, 180=South (single-string mode)')
     parser.add_argument('--shortname', default=cfg.get('shortname'),
                         help='Short identifier used as string name in single-string mode')
+    parser.add_argument('--string', action='append', dest='string_args',
+                        metavar='NAME:CAPACITY:TILT:AZIMUTH',
+                        help='Define a PV string (repeatable). Example: --string PV1:15:30:205')
 
     # Calculate-only options
     time_group = parser.add_mutually_exclusive_group()
@@ -137,9 +140,23 @@ def parse_args_and_config():
     if missing_site:
         parser.error(f'required (via CLI or config.cfg): {", ".join(missing_site)}')
 
-    # Build string list from [PV*] config sections, or fall back to single-string CLI params
+    # Build string list: --string flags > [PV*] config sections > single-string CLI params
     pv_sections = [s for s in full_cfg.sections() if s not in RESERVED_SECTIONS]
-    if pv_sections:
+    if args.string_args:
+        args.strings = []
+        for s in args.string_args:
+            try:
+                name, capacity, tilt, azimuth = s.split(':')
+                args.strings.append({
+                    'name': name,
+                    'capacity': float(capacity),
+                    'tilt': float(tilt),
+                    'azimuth': float(azimuth),
+                    'solcast_resource_id': None,
+                })
+            except (ValueError, TypeError):
+                parser.error(f"--string format must be NAME:CAPACITY:TILT:AZIMUTH, got: {s!r}")
+    elif pv_sections:
         args.strings = []
         for name in pv_sections:
             sec = full_cfg[name]
