@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-# pvcalc-api.py — Flask HTTP API server for pvcalc.
+# pv-calc-forecast-api.py — Flask HTTP API server for pv-calc-forecast.
 #
 # Loads pv-calc-forecast.py once at startup (importlib, because of the hyphen in the filename).
 # All endpoints call its calculation/forecast functions directly — no subprocess overhead.
@@ -7,7 +7,7 @@
 # Primary use case: Prometheus scrape via GET /metrics (theoretical + forecast together).
 # Secondary: ad-hoc JSON queries via /forecast and /calculate.
 #
-# Start: python3 pvcalc-api.py
+# Start: python3 pv-calc-forecast-api.py
 
 import copy
 import importlib.util
@@ -194,7 +194,7 @@ def index():
 
     return f"""<!DOCTYPE html>
 <html>
-<head><meta charset="utf-8"><title>pvcalc-api</title>
+<head><meta charset="utf-8"><title>pv-calc-forecast-api</title>
 <style>
   body  {{ font-family: monospace; max-width: 820px; margin: 40px auto; padding: 0 20px; color: #222; }}
   h1   {{ font-size: 1.3em; margin-bottom: 0.2em; }}
@@ -211,7 +211,7 @@ def index():
 </style>
 </head>
 <body>
-<h1>pvcalc-api</h1>
+<h1>pv-calc-forecast-api</h1>
 <p class="dim">Uptime: {h}h {m}m {s}s &nbsp;&mdash;&nbsp;
    {datetime.now(base_args.timezone).strftime('%Y-%m-%d %H:%M %Z')}</p>
 
@@ -367,7 +367,7 @@ def calculate():
 # ──────────────────────────────────────────────────────────────────────────────
 
 if __name__ == '__main__':
-    print(f"pvcalc-api listening on {_api_host}:{_api_port}", file=sys.stderr)
+    print(f"pv-calc-forecast-api listening on {_api_host}:{_api_port}", file=sys.stderr)
     print(f"  location : {base_args.latitude}, {base_args.longitude} ({base_args.timezone})", file=sys.stderr)
     print(f"  strings  : {', '.join(st['name'] for st in base_args.strings)}", file=sys.stderr)
     print(f"  forecast : {_forecast_source}", file=sys.stderr)

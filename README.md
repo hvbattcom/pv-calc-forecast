@@ -9,7 +9,7 @@ Supports **multiple PV strings** (panel arrays with different orientations) in a
 - **Calculate mode** — theoretical DC output under clear-sky conditions via pvlib
 - **Forecast mode** — real weather forecast from three sources, with local pvlib transposition to your actual tilt/azimuth
 - **Multi-string support** — define multiple panel arrays (PV1, PV2, PV3…) via config or CLI; per-string and total metrics emitted
-- **Flask API server** (`pvcalc-api.py`) — libraries loaded once at startup; Prometheus scrape endpoint + JSON REST endpoints
+- **Flask API server** (`pv-calc-forecast-api.py`) — libraries loaded once at startup; Prometheus scrape endpoint + JSON REST endpoints
 - Forecast caching (1 hour TTL) — weather data fetched once per location, transposed per string
 - Output formats: human-readable table, JSON, Prometheus metrics
 - `config.cfg` for storing all parameters — config keys match CLI flags exactly (strip the `--`)
@@ -251,10 +251,10 @@ solar_forecast_current_hour_w{string="total"} 27700
 
 ## API server
 
-`pvcalc-api.py` is a Flask HTTP server that loads all libraries once at startup and serves requests by calling the same calculation/forecast functions directly — no subprocess overhead.
+`pv-calc-forecast-api.py` is a Flask HTTP server that loads all libraries once at startup and serves requests by calling the same calculation/forecast functions directly — no subprocess overhead.
 
 ```bash
-python3 pvcalc-api.py
+python3 pv-calc-forecast-api.py
 ```
 
 Startup output shows the bound address, location, configured strings, and forecast source. The forecast is fetched in the background at startup so the first scrape returns immediately.
@@ -286,6 +286,51 @@ curl -X POST http://localhost:5001/forecast \
   -d '{"source":"open-meteo","strings":[{"name":"PV1","capacity":15,"tilt":30,"azimuth":205}]}'
 
 curl http://localhost:5001/calculate?at=14:00&format=json
+```
+
+## Deployment as a systemd service
+
+A ready-to-use unit file is included: `pv-calc-forecast-api.service`.
+
+### 1. Install the project
+
+```bash
+git clone https://github.com/youruser/pv-calc-forecast /opt/pv-calc-forecast
+cd /opt/pv-calc-forecast
+pip3 install -r requirements.txt
+```
+
+### 2. Configure
+
+```bash
+cp /opt/pv-calc-forecast/config.cfg.example /opt/pv-calc-forecast/config.cfg
+nano /opt/pv-calc-forecast/config.cfg
+```
+
+### 3. Install and enable the service
+
+```bash
+sudo cp /opt/pv-calc-forecast/pv-calc-forecast-api.service /etc/systemd/system/
+sudo systemctl daemon-reload
+sudo systemctl enable --now pv-calc-forecast-api
+```
+
+### 4. Verify
+
+```bash
+sudo systemctl status pv-calc-forecast-api
+journalctl -u pv-calc-forecast-api -f          # live logs
+curl http://localhost:5001/           # landing page
+curl http://localhost:5001/metrics    # Prometheus output
+```
+
+### Prometheus scrape config
+
+```yaml
+scrape_configs:
+  - job_name: pvcalc
+    static_configs:
+      - targets: ['localhost:5001']
 ```
 
 ## Notes

@@ -10,7 +10,7 @@ format   = prometheus         # default output format: human, json, prometheus
 # hourly-window = 0-5         # minutes past the hour to emit full hourly data
 # solcast-api-key   = your-key-here
 
-# API server (pvcalc-api.py)
+# API server (pv-calc-forecast-api.py)
 # host      = 0.0.0.0         # bind address
 # port      = 5001            # listening port
 

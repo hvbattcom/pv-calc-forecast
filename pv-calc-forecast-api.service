@@ -1,0 +1,22 @@
+[Unit]
+Description=Solar PV Forecast API
+Documentation=https://github.com/youruser/pv-calc-forecast
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=solar
+WorkingDirectory=/opt/pv-calc-forecast
+
+ExecStart=/usr/bin/python3 pv-calc-forecast-api.py
+
+Restart=on-failure
+RestartSec=10
+
+# Write startup output to the journal (view with: journalctl -u pv-calc-forecast-api)
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=multi-user.target
