@@ -160,11 +160,22 @@ ok "pv-calc-forecast-api started"
 # ── Step 7: Health check ──────────────────────────────────────────────────────
 
 step "7/7  Health check"
-sleep 2
-if curl -sf "http://localhost:${API_PORT}/" >/dev/null; then
+# First startup imports pandas/pvlib/timezonefinder, which can take well
+# over a couple of seconds on a Radxa-class ARM board -- poll instead of
+# guessing a fixed sleep.
+HEALTHY=0
+for _ in $(seq 1 20); do
+    if curl -sf "http://localhost:${API_PORT}/" >/dev/null 2>&1; then
+        HEALTHY=1
+        break
+    fi
+    sleep 1
+done
+
+if (( HEALTHY )); then
     ok "API responding on :${API_PORT}  →  http://localhost:${API_PORT}/"
 else
-    fail "API did not respond on :${API_PORT}"
+    fail "API did not respond on :${API_PORT} within 20s"
     echo "  Check logs:  journalctl -u pv-calc-forecast-api -n 30" >&2
     exit 1
 fi
