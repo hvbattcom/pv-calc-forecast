@@ -6,13 +6,14 @@ set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
-# ── Help ──────────────────────────────────────────────────────────────────────
+# ── Help / flags ──────────────────────────────────────────────────────────────
 
+VERBOSE=0
 for arg in "$@"; do
     case "$arg" in
         -h|--help)
             cat <<'EOF'
-Usage: sudo ./deploy.sh
+Usage: sudo ./deploy.sh [-v|--verbose]
 
 One-time deployment for pv-calc-forecast. Steps performed:
   1. Install system packages  (python3 python3-pip)
@@ -26,6 +27,9 @@ One-time deployment for pv-calc-forecast. Steps performed:
 Safe to re-run – all steps are idempotent, except step 3, which only
 copies the example config once and never overwrites an existing one.
 
+  -v, --verbose  Full shell tracing (set -x) plus unfiltered apt/pip
+                 output, for debugging a failed run.
+
 Unlike solar-management, there's nothing to auto-discover here: if
 config.cfg didn't exist yet, it's created from the example with
 placeholder coordinates and PV strings. The service will start and run
@@ -34,15 +38,21 @@ data, the forecast it serves is meaningless.
 EOF
             exit 0
             ;;
+        -v|--verbose)
+            VERBOSE=1
+            ;;
     esac
 done
 
+(( VERBOSE )) && set -x
+
 # ── Helpers ───────────────────────────────────────────────────────────────────
 
-ok()   { printf "  \033[32m✓\033[0m  %s\n" "$*"; }
-fail() { printf "  \033[31m✗\033[0m  %s\n" "$*" >&2; }
-step() { printf "\n\033[1;36m══ %s\033[0m\n" "$*"; }
-die()  { fail "$*"; exit 1; }
+ok()    { printf "  \033[32m✓\033[0m  %s\n" "$*"; }
+fail()  { printf "  \033[31m✗\033[0m  %s\n" "$*" >&2; }
+step()  { printf "\n\033[1;36m══ %s\033[0m\n" "$*"; }
+die()   { fail "$*"; exit 1; }
+debug() { (( VERBOSE )) && printf "  \033[2m[debug] %s\033[0m\n" "$*" || true; }
 
 # Read a single value from an INI file: ini_get <file> <section> <key>
 ini_get() {
@@ -67,9 +77,13 @@ done
 
 if (( ${#MISSING_APT[@]} )); then
     echo "  Installing: ${MISSING_APT[*]}"
-    apt-get install -y "${MISSING_APT[@]}" 2>&1 \
-        | grep -E '^(Get:|Unpacking|Setting up|Processing)' \
-        | sed 's/^/    /' || true
+    if (( VERBOSE )); then
+        apt-get install -y "${MISSING_APT[@]}"
+    else
+        apt-get install -y "${MISSING_APT[@]}" 2>&1 \
+            | grep -E '^(Get:|Unpacking|Setting up|Processing)' \
+            | sed 's/^/    /' || true
+    fi
     ok "Installed: ${MISSING_APT[*]}"
 else
     ok "All apt packages already present"
@@ -90,7 +104,11 @@ done < "$REQUIREMENTS"
 
 if (( ${#MISSING_PY[@]} )); then
     echo "  Installing: ${MISSING_PY[*]}"
-    pip install -q "${MISSING_PY[@]}" --break-system-packages || die "pip install failed"
+    if (( VERBOSE )); then
+        pip install "${MISSING_PY[@]}" --break-system-packages || die "pip install failed"
+    else
+        pip install -q "${MISSING_PY[@]}" --break-system-packages || die "pip install failed"
+    fi
     ok "Installed: ${MISSING_PY[*]}"
 else
     ok "All Python packages already present"
@@ -116,6 +134,7 @@ step "4/7  Generate pv-calc-forecast-api.service"
 
 API_PORT=$(ini_get "$CONFIG" system port)
 API_PORT=${API_PORT:-5001}
+debug "port=$API_PORT workdir=$SCRIPT_DIR"
 
 SERVICE_FILE="$SCRIPT_DIR/pv-calc-forecast-api.service"
 
@@ -164,11 +183,12 @@ step "7/7  Health check"
 # over a couple of seconds on a Radxa-class ARM board -- poll instead of
 # guessing a fixed sleep.
 HEALTHY=0
-for _ in $(seq 1 20); do
+for i in $(seq 1 20); do
     if curl -sf "http://localhost:${API_PORT}/" >/dev/null 2>&1; then
         HEALTHY=1
         break
     fi
+    debug "waiting for API (attempt $i/20)"
     sleep 1
 done
 
@@ -177,6 +197,7 @@ if (( HEALTHY )); then
 else
     fail "API did not respond on :${API_PORT} within 20s"
     echo "  Check logs:  journalctl -u pv-calc-forecast-api -n 30" >&2
+    echo "  Or re-run with -v/--verbose for full output" >&2
     exit 1
 fi
 
