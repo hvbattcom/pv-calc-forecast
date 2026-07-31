@@ -290,9 +290,42 @@ curl http://localhost:5001/calculate?at=14:00&format=json
 
 ## Deployment as a systemd service
 
-A ready-to-use unit file is included: `pv-calc-forecast-api.service`.
+### Quick deploy (`deploy.sh`)
 
-### 1. Install the project
+```bash
+sudo ./deploy.sh
+```
+
+Installs system + Python dependencies, creates `config.cfg` from
+`config.cfg.example` if it doesn't exist yet, generates and enables the
+`pv-calc-forecast-api` systemd unit (`User=solar`, pointed at wherever the
+repo is actually checked out), starts it, and health-checks it (polling
+for up to 20s -- first-time package installs and a cold start, e.g.
+importing `pandas`/`pvlib`/`timezonefinder`, can take longer than a
+couple of seconds, especially on ARM boards).
+
+There's nothing to auto-discover here (unlike `solar-management`): if
+`config.cfg` had to be created from the example, the service still starts
+and runs fine, but the closing message will tell you it's serving a
+forecast for the placeholder site data until you edit `config.cfg` with
+your real latitude/longitude and PV strings and restart the service.
+
+If a run fails, re-run with `-v`/`--verbose` for full shell tracing and
+unfiltered apt/pip output instead of the default filtered summary:
+
+```bash
+sudo ./deploy.sh --verbose
+```
+
+Safe to re-run — every step is idempotent except creating `config.cfg`,
+which never overwrites an existing one.
+
+### Manual steps
+
+What `deploy.sh` does under the hood, if you'd rather do it by hand (or
+adapt it):
+
+#### 1. Install the project
 
 ```bash
 git clone https://github.com/youruser/pv-calc-forecast /opt/pv-calc-forecast
@@ -300,14 +333,14 @@ cd /opt/pv-calc-forecast
 pip3 install -r requirements.txt
 ```
 
-### 2. Configure
+#### 2. Configure
 
 ```bash
 cp /opt/pv-calc-forecast/config.cfg.example /opt/pv-calc-forecast/config.cfg
 nano /opt/pv-calc-forecast/config.cfg
 ```
 
-### 3. Install and enable the service
+#### 3. Install and enable the service
 
 ```bash
 sudo cp /opt/pv-calc-forecast/pv-calc-forecast-api.service /etc/systemd/system/
@@ -315,7 +348,7 @@ sudo systemctl daemon-reload
 sudo systemctl enable --now pv-calc-forecast-api
 ```
 
-### 4. Verify
+#### 4. Verify
 
 ```bash
 sudo systemctl status pv-calc-forecast-api
