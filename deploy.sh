@@ -14,6 +14,7 @@ LATITUDE=""
 LONGITUDE=""
 TIMEZONE=""
 FORECAST="open-meteo"
+HOURLY_WINDOW=""
 PV_STRINGS=()
 for arg in "$@"; do
     case "$arg" in
@@ -21,7 +22,8 @@ for arg in "$@"; do
             cat <<'EOF'
 Usage: sudo ./deploy.sh [-v|--verbose] [--run-service-as=<user>]
                          [--latitude=<lat> --longitude=<lon>] [--timezone=<tz>]
-                         [--forecast=<source>] [--pv-string=NAME:CAPACITY:TILT:AZIMUTH ...]
+                         [--forecast=<source>] [--hourly-window=<start>-<end>]
+                         [--pv-string=NAME:CAPACITY:TILT:AZIMUTH ...]
 
 One-time deployment for pv-calc-forecast. Steps performed:
   1. Install system packages  (python3 python3-pip)
@@ -46,6 +48,12 @@ writes config.cfg once and never overwrites an existing one.
                              omitted (see pv-calc-forecast.py).
   --forecast=<source>       Default forecast source written to config.cfg:
                              forecast-solar, open-meteo (default), solcast.
+  --hourly-window=<start>-<end>
+                             Minutes within each hour that solar_forecast_hour_w
+                             is emitted (see pv-calc-forecast.py's own
+                             --hourly-window). Optional -- omitted entirely
+                             (pv-calc-forecast.py's own default, every minute)
+                             if not given.
   --pv-string=NAME:CAPACITY:TILT:AZIMUTH
                              Define one PV string. Repeatable (PV1, PV2,
                              ...) -- same NAME:CAPACITY:TILT:AZIMUTH format
@@ -78,6 +86,9 @@ EOF
             ;;
         --forecast=*)
             FORECAST="${arg#*=}"
+            ;;
+        --hourly-window=*)
+            HOURLY_WINDOW="${arg#*=}"
             ;;
         --pv-string=*)
             PV_STRINGS+=("${arg#*=}")
@@ -113,6 +124,9 @@ for pv in "${PV_STRINGS[@]}"; do
     [[ "$pv" =~ ^[^:]+:[^:]+:[^:]+:[^:]+$ ]] \
         || die "--pv-string must be NAME:CAPACITY:TILT:AZIMUTH, got: $pv"
 done
+
+[[ -z "$HOURLY_WINDOW" || "$HOURLY_WINDOW" =~ ^[0-9]+-[0-9]+$ ]] \
+    || die "--hourly-window must be 'start-end' (e.g. 0-5), got: $HOURLY_WINDOW"
 
 # ── Step 1: System packages ───────────────────────────────────────────────────
 
@@ -180,6 +194,7 @@ elif [[ -n "$LATITUDE" && -n "$LONGITUDE" && ${#PV_STRINGS[@]} -gt 0 ]]; then
         [[ -n "$TIMEZONE" ]] && echo "timezone  = $TIMEZONE"
         echo "forecast = $FORECAST"
         echo "format   = prometheus"
+        [[ -n "$HOURLY_WINDOW" ]] && echo "hourly-window = $HOURLY_WINDOW"
         for pv in "${PV_STRINGS[@]}"; do
             IFS=':' read -r pv_name pv_capacity pv_tilt pv_azimuth <<< "$pv"
             echo ""
