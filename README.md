@@ -296,19 +296,47 @@ curl http://localhost:5001/calculate?at=14:00&format=json
 sudo ./deploy.sh
 ```
 
-Installs system + Python dependencies, creates `config.cfg` from
-`config.cfg.example` if it doesn't exist yet, generates and enables the
-`pv-calc-forecast-api` systemd unit (`User=solar`, pointed at wherever the
-repo is actually checked out), starts it, and health-checks it (polling
-for up to 20s -- first-time package installs and a cold start, e.g.
-importing `pandas`/`pvlib`/`timezonefinder`, can take longer than a
-couple of seconds, especially on ARM boards).
+Installs system + Python dependencies, creates `config.cfg` if it doesn't
+exist yet, generates and enables the `pv-calc-forecast-api` systemd unit
+(pointed at wherever the repo is actually checked out), starts it, and
+health-checks it (polling for up to 20s -- first-time package installs
+and a cold start, e.g. importing `pandas`/`pvlib`/`timezonefinder`, can
+take longer than a couple of seconds, especially on ARM boards).
 
-There's nothing to auto-discover here (unlike `solar-management`): if
-`config.cfg` had to be created from the example, the service still starts
-and runs fine, but the closing message will tell you it's serving a
-forecast for the placeholder site data until you edit `config.cfg` with
-your real latitude/longitude and PV strings and restart the service.
+There's nothing to auto-discover here (unlike `solar-management`): with
+no flags, `config.cfg` is created from `config.cfg.example` and the
+service still starts and runs fine, but the closing message will tell
+you it's serving a forecast for placeholder site data until you edit
+`config.cfg` yourself and restart the service. To skip that manual edit,
+pass real site data on the command line instead -- if `config.cfg`
+doesn't exist yet, it's generated straight from the flags:
+
+```bash
+sudo ./deploy.sh \
+  --latitude=41.000 --longitude=22.000 --timezone=Europe/Athens \
+  --forecast=open-meteo \
+  --pv-string=PV1:15.0:30:205 --pv-string=PV2:10.0:25:90
+```
+
+- `--latitude`/`--longitude` — required together to generate a real
+  config; `--timezone` is optional (auto-detected from coordinates if
+  omitted, same as the CLI tool itself).
+- `--forecast` — default forecast source written to `config.cfg`:
+  `forecast-solar`, `open-meteo` (default if omitted), `solcast`.
+- `--pv-string=NAME:CAPACITY:TILT:AZIMUTH` — one PV string, repeatable
+  (`PV1`, `PV2`, ...). Same `NAME:CAPACITY:TILT:AZIMUTH` format as
+  `pv-calc-forecast.py`'s own `--string` flag (see above). At least one
+  is required for the flag-driven config to be written.
+
+`--latitude`/`--longitude`/`--pv-string` only take effect together and
+only while `config.cfg` doesn't exist yet -- an incomplete combination
+(e.g. `--latitude` with no `--longitude`) or an already-existing
+`config.cfg` both fall back to today's placeholder-from-example
+behavior, so a bad or partial flag never produces a half-written config.
+
+`--run-service-as=<user>` sets the systemd unit's `User=` (defaults to
+whoever ran `sudo`, same convention as `solar-management`'s and
+`configurable-exporter`'s `deploy.sh`).
 
 If a run fails, re-run with `-v`/`--verbose` for full shell tracing and
 unfiltered apt/pip output instead of the default filtered summary:
