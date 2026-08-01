@@ -8,7 +8,8 @@
 #
 # Multi-string: define [PV1], [PV2], ... sections in config.cfg.
 # Each section becomes a separate string= label in Prometheus output,
-# plus an aggregated string="total" row when more than one string is present.
+# plus an aggregated string="total" row -- always present, even for a
+# single string, so dashboards/queries can rely on string="total" unconditionally.
 
 import argparse
 import configparser
@@ -827,7 +828,6 @@ def format_json(data, mode, args):
 
 def format_prometheus(data, mode, args):
     lines = []
-    multi = len(data) > 1
 
     if mode == 'calculate':
         lines.append("# HELP theoretical_pv_w Theoretical DC power output under clear-sky conditions in watts")
@@ -842,9 +842,8 @@ def format_prometheus(data, mode, args):
             total_capacity += sr['capacity']
             lbls = {'string': sr['name'], 'plant': 'theoretical', 'capacity': str(sr['capacity'])}
             lines.append(f'theoretical_pv_w{_label_str(lbls)} {watts:.2f}')
-        if multi:
-            lbls = {'string': 'total', 'plant': 'theoretical', 'capacity': str(total_capacity)}
-            lines.append(f'theoretical_pv_w{_label_str(lbls)} {total_watts:.2f}')
+        lbls = {'string': 'total', 'plant': 'theoretical', 'capacity': str(total_capacity)}
+        lines.append(f'theoretical_pv_w{_label_str(lbls)} {total_watts:.2f}')
         return "\n".join(lines)
 
     # Forecast mode
@@ -858,10 +857,9 @@ def format_prometheus(data, mode, args):
         for date, wh in sorted(sr['watt_hours_day'].items()):
             lbls = {'string': sr['name'], 'date': date}
             lines.append(f'solar_forecast_day_wh{_label_str(lbls)} {round(wh)}')
-    if multi:
-        for date, wh in sorted(total_watt_hours_day.items()):
-            lbls = {'string': 'total', 'date': date}
-            lines.append(f'solar_forecast_day_wh{_label_str(lbls)} {round(wh)}')
+    for date, wh in sorted(total_watt_hours_day.items()):
+        lbls = {'string': 'total', 'date': date}
+        lines.append(f'solar_forecast_day_wh{_label_str(lbls)} {round(wh)}')
 
     current_minute = datetime.now().minute
     hw = args.hourly_window
@@ -878,25 +876,23 @@ def format_prometheus(data, mode, args):
                     continue
                 lbls = {'string': sr['name'], 'date': dt.strftime('%Y-%m-%d'), 'hour': dt.strftime('%H:00')}
                 lines.append(f'solar_forecast_hour_w{_label_str(lbls)} {round(watts)}')
-        if multi:
-            for ts_str, watts in sorted(total_watts_tilted.items()):
-                try:
-                    dt = datetime.strptime(ts_str, "%Y-%m-%d %H:%M:%S")
-                except ValueError:
-                    continue
-                if dt.minute != 0 or dt.second != 0:
-                    continue
-                lbls = {'string': 'total', 'date': dt.strftime('%Y-%m-%d'), 'hour': dt.strftime('%H:00')}
-                lines.append(f'solar_forecast_hour_w{_label_str(lbls)} {round(watts)}')
+        for ts_str, watts in sorted(total_watts_tilted.items()):
+            try:
+                dt = datetime.strptime(ts_str, "%Y-%m-%d %H:%M:%S")
+            except ValueError:
+                continue
+            if dt.minute != 0 or dt.second != 0:
+                continue
+            lbls = {'string': 'total', 'date': dt.strftime('%Y-%m-%d'), 'hour': dt.strftime('%H:00')}
+            lines.append(f'solar_forecast_hour_w{_label_str(lbls)} {round(watts)}')
 
     lines.append("\n# HELP solar_forecast_current_hour_w Forecasted solar power output for the current hour in watts")
     lines.append("# TYPE solar_forecast_current_hour_w gauge")
     for sr in data:
         lbls = {'string': sr['name']}
         lines.append(f'solar_forecast_current_hour_w{_label_str(lbls)} {round(sr["current_hour_watts"])}')
-    if multi:
-        lbls = {'string': 'total'}
-        lines.append(f'solar_forecast_current_hour_w{_label_str(lbls)} {round(total_current_hour)}')
+    lbls = {'string': 'total'}
+    lines.append(f'solar_forecast_current_hour_w{_label_str(lbls)} {round(total_current_hour)}')
 
     return "\n".join(lines)
 
